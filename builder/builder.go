@@ -1,18 +1,72 @@
 package builder
 
 import (
-	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path"
 
+	"github.com/hashicorp/waypoint-plugin-sdk/component"
+	"github.com/hashicorp/waypoint-plugin-sdk/docs"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
+	"github.com/mholt/archiver/v3"
 )
 
 type BuilderConfig struct {
-	Directory string `hcl:"Directory,optional"`
+	// Sources is a list of files and/or directories to package inside the archive.
+	Sources []string `hcl:"sources"`
+	// OutputName is the name of the archive file.
+	OutputName string `hcl:"output_name"`
+	// OverwriteExisting indicates whether to overwrite the existing file;
+	// if false, an error is returned if the file exists.
+	OverwriteExisting bool `hcl:"overwrite_existing,optional"`
 }
 
 type Builder struct {
 	config BuilderConfig
+}
+
+// Documentation implements Documented.
+func (b *Builder) Documentation() (*docs.Documentation, error) {
+	doc, err := docs.New(docs.FromConfig(&BuilderConfig{}))
+	if err != nil {
+		return nil, err
+	}
+
+	doc.Description("Archive")
+
+	doc.Example(`
+build {
+  use "archive" {
+      sources = ["./src", "./public", "./package.json"]      
+      output_name = "webapp.zip"
+      overwrite_existing = true
+  }
+}
+`)
+
+	doc.Input("component.Source")
+	doc.Output("archive.Archive")
+
+	_ = doc.SetField(
+		"sources",
+		"a list of files and/or directories to package inside the archive",
+		docs.Summary(
+			"The list of files and/or directoires to package inside the archive. "+
+				"The sources should be relative to the path of the application being built. ",
+			"Ex: `/path/to/project/app/`",
+		),
+	)
+
+	_ = doc.SetField("output_name", "the name of the archive file", docs.Summary())
+
+	_ = doc.SetField(
+		"overwrite_existing",
+		"if false, an error is returned if the file exists.",
+		docs.Summary("Whether to overwrite the existing file; if false, an error is returned if the file exists."),
+	)
+
+	return doc, nil
 }
 
 // Config implements Configurable.
@@ -29,8 +83,9 @@ func (b *Builder) ConfigSet(config interface{}) error {
 	}
 
 	// validate the config
-	if c.Directory == "" {
-		return fmt.Errorf("Directory must be set to a valid directory")
+	sources := c.Sources
+	if len(sources) == 0 {
+		return errors.New("Sources can't be empty, please provide the path to at least one file or directory")
 	}
 
 	return nil
@@ -65,10 +120,40 @@ func (b *Builder) BuildFunc() interface{} {
 // as an input parameter.
 // If an error is returned, Waypoint stops the execution flow and
 // returns an error to the user.
-func (b *Builder) build(ctx context.Context, ui terminal.UI) (*Binary, error) {
+func (b *Builder) build(source *component.Source, ui terminal.UI) (*Archive, error) {
+	ui.Output(fmt.Sprintf("Config is %+v", b.config))
+	ui.Output(fmt.Sprintf("Source is %+v", source))
+
 	u := ui.Status()
 	defer u.Close()
-	u.Update("Building application")
+	u.Update("Creating archive")
 
-	return &Binary{}, nil
+	cwd, err := os.Getwd()
+	if err != nil {
+		u.Step(terminal.StatusError, "Error getting current working directory")
+		return nil, err
+	}
+
+	sourcePath := source.Path
+	sources := b.config.Sources
+
+	for i, src := range sources {
+		sources[i] = path.Join(sourcePath, src)
+	}
+
+	outputName := b.config.OutputName
+	outputPath := path.Join(cwd, sourcePath, outputName)
+
+	zip := archiver.NewZip()
+	zip.OverwriteExisting = b.config.OverwriteExisting
+
+	err = zip.Archive(sources, outputPath)
+	if err != nil {
+		u.Step(terminal.StatusError, "Archive failed")
+		return nil, err
+	}
+
+	u.Step(terminal.StatusOK, "Archive saved to '"+outputPath+"'")
+
+	return &Archive{OutputPath: outputPath}, nil
 }

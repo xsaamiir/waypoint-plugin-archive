@@ -1,31 +1,31 @@
-# Waypoint Plugin Template
+# Waypoint Plugin Archive [**WIP**]
 
-This folder contains an example plugin structure which can be used when building your own plugins.
+waypoint-plugin-archive is a builder plugin for [Waypoint](https://github.com/hashicorp/waypoint). 
+It allows you to archive source files or directories.
 
-## Steps
+**This plugin is still work in progress, please open an issue for any feedback or issues.**
 
-1. To scaffold a new plugin use the `./clone.sh` script passing the destination folder and the Go package
-for your new plugin as parameters
+# Install
+To install the plugin, run the following command:
 
-```shell
-./clone.sh ../destination_folder github.com/myorg/mypackage
+````bash
+make install # Installs the plugin in `${HOME}/.config/waypoint/plugins/`
+````
+
+# Configure
+```hcl
+project = "project"
+
+app "webapp" {
+  path = "./webapp"
+
+  build {
+    use "archive" {
+      sources = ["src/", "public/", "package.json"] # Sources are relative to /path/to/project/webapp/
+      output_name = "webapp.zip"
+      overwrite_existing = true
+    }
+  }
+}
 ```
 
-2. You can then run the Makefile to compile the new plugin
-
-```shell
-cd ../destination_folder
-
-make
-```
-
-```shell
-Build Protos
-protoc -I . --go_opt=plugins=grpc --go_out=../../../../ ./builder/output.proto
-protoc -I . --go_opt=plugins=grpc --go_out=../../../../ ./registry/output.proto
-protoc -I . --go_opt=plugins=grpc --go_out=../../../../ ./platform/output.proto
-protoc -I . --go_opt=plugins=grpc --go_out=../../../../ ./release/output.proto
-
-Compile Plugin
-go build -o ./bin/waypoint-plugin-template ./main.go
-```

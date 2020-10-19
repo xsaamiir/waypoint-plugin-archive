@@ -3,8 +3,8 @@ syntax = "proto3";
 
 package builder;
 
-option go_package = "github.com/sharkyze/waypoint-plugin-gae/builder";
+option go_package = "github.com/sharkyze/waypoint-plugin-archive/builder";
 
-message Binary {
-  string location = 1;
+message Archive {
+  string output_path = 1;
 }
