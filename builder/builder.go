@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 
+	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/waypoint-plugin-sdk/component"
 	"github.com/hashicorp/waypoint-plugin-sdk/docs"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
@@ -120,9 +121,8 @@ func (b *Builder) BuildFunc() interface{} {
 // as an input parameter.
 // If an error is returned, Waypoint stops the execution flow and
 // returns an error to the user.
-func (b *Builder) build(source *component.Source, ui terminal.UI) (*Archive, error) {
-	ui.Output(fmt.Sprintf("Config is %+v", b.config))
-	ui.Output(fmt.Sprintf("Source is %+v", source))
+func (b *Builder) build(source *component.Source, logger hclog.Logger, ui terminal.UI) (*Archive, error) {
+	logger.Trace("creating a new archive", "config", b.config)
 
 	u := ui.Status()
 	defer u.Close()
