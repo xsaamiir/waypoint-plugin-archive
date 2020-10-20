@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/waypoint-plugin-sdk/component"
 	"github.com/hashicorp/waypoint-plugin-sdk/docs"
 	"github.com/hashicorp/waypoint-plugin-sdk/terminal"
-	"github.com/mholt/archiver/v3"
 )
 
 type BuilderConfig struct {
@@ -21,6 +21,11 @@ type BuilderConfig struct {
 	// OverwriteExisting indicates whether to overwrite the existing file;
 	// if false, an error is returned if the file exists.
 	OverwriteExisting bool `hcl:"overwrite_existing,optional"`
+	// Ignore is a list of files or directories to ignore when reading sources.
+	Ignore []string `hcl:"ignore,optional"`
+	// CollapseTopLevelFolder indicates whether to include the source directory in
+	// the archive or only add its content.
+	CollapseTopLevelFolder bool `hcl:"collapse_top_level_folder,optional"`
 }
 
 type Builder struct {
@@ -39,9 +44,11 @@ func (b *Builder) Documentation() (*docs.Documentation, error) {
 	doc.Example(`
 build {
   use "archive" {
-      sources = ["./src", "./public", "./package.json"]      
+      sources = ["."]      
       output_name = "webapp.zip"
       overwrite_existing = true
+      ignore = ["node_modules", "src/docs/README.md"]
+	  collapse_top_level_folder = true
   }
 }
 `)
@@ -51,7 +58,7 @@ build {
 
 	_ = doc.SetField(
 		"sources",
-		"a list of files and/or directories to package inside the archive",
+		"The list of files and/or directories to package inside the archive",
 		docs.Summary(
 			"The list of files and/or directoires to package inside the archive. "+
 				"The sources should be relative to the path of the application being built. ",
@@ -59,12 +66,25 @@ build {
 		),
 	)
 
-	_ = doc.SetField("output_name", "the name of the archive file", docs.Summary())
+	_ = doc.SetField("output_name", "The name of the archive file")
 
 	_ = doc.SetField(
 		"overwrite_existing",
-		"if false, an error is returned if the file exists.",
-		docs.Summary("Whether to overwrite the existing file; if false, an error is returned if the file exists."),
+		"Whether to overwrite the existing file; if false, an error is returned if the file exists.",
+		docs.Default("false"),
+	)
+
+	_ = doc.SetField(
+		"ignore",
+		"A list of paths to files and/or directories to ignore while creating the archive. "+
+			"The paths should be relative to the folder of the app.",
+	)
+
+	_ = doc.SetField(
+		"collapse_top_level_folder",
+		"Whether to add to the source directory in the archive or only its content; if false, "+
+			"the source directory will be included in the archive, if true only the content will be included.",
+		docs.Default("false"),
 	)
 
 	return doc, nil
@@ -116,44 +136,106 @@ func (b *Builder) BuildFunc() interface{} {
 // - *component.LabelSet
 //
 // The output parameters for BuildFunc must be a Struct which can
-// be serialzied to Protocol Buffers binary format and an error.
+// be serialized to Protocol Buffers binary format and an error.
 // This Output Value will be made available for other functions
 // as an input parameter.
 // If an error is returned, Waypoint stops the execution flow and
 // returns an error to the user.
 func (b *Builder) build(source *component.Source, logger hclog.Logger, ui terminal.UI) (*Archive, error) {
-	logger.Trace("creating a new archive", "config", b.config)
+	logger.Debug("creating a new archive", "config", b.config)
 
-	u := ui.Status()
-	defer u.Close()
-	u.Update("Creating archive")
+	st := ui.Status()
+	defer st.Close()
+
+	st.Update("Creating archive")
 
 	cwd, err := os.Getwd()
 	if err != nil {
-		u.Step(terminal.StatusError, "Error getting current working directory")
+		st.Step(terminal.StatusError, "Error getting current working directory")
 		return nil, err
 	}
 
-	sourcePath := source.Path
+	sourcePath := path.Join(cwd, source.Path)
 	sources := b.config.Sources
+	ignore := b.config.Ignore
+	xsources := make([]string, 0)
+	outputPath := path.Join(sourcePath, b.config.OutputName)
 
-	for i, src := range sources {
-		sources[i] = path.Join(sourcePath, src)
+	if !b.config.OverwriteExisting && fileExists(outputPath) {
+		return nil, errors.New("Output file already exists")
 	}
 
-	outputName := b.config.OutputName
-	outputPath := path.Join(cwd, sourcePath, outputName)
+	for _, src := range sources {
+		xsrc, err := expandSource(path.Join(sourcePath, src), ignore)
+		if err != nil {
+			st.Step(terminal.StatusError, "Error expanding source")
+			return nil, err
+		}
 
-	zip := archiver.NewZip()
-	zip.OverwriteExisting = b.config.OverwriteExisting
+		xsources = append(xsources, xsrc...)
+	}
 
-	err = zip.Archive(sources, outputPath)
+	basePath := cwd
+	if b.config.CollapseTopLevelFolder {
+		basePath = sourcePath
+	}
+
+	err = archive(xsources, basePath, outputPath)
 	if err != nil {
-		u.Step(terminal.StatusError, "Archive failed")
+		st.Step(terminal.StatusError, "Archive failed")
 		return nil, err
 	}
 
-	u.Step(terminal.StatusOK, "Archive saved to '"+outputPath+"'")
+	st.Step(terminal.StatusOK, "Archive saved to '"+outputPath+"'")
 
 	return &Archive{OutputPath: outputPath}, nil
+}
+
+func fileExists(name string) bool {
+	_, err := os.Stat(name)
+	return !os.IsNotExist(err)
+}
+
+// expandSource returns the list of files recursively under a path.
+func expandSource(source string, ignoreList []string) ([]string, error) {
+	ignoreLookup := make(map[string]struct{})
+	for _, i := range ignoreList {
+		ignoreLookup[filepath.Clean(i)] = struct{}{}
+	}
+
+	var sources []string
+
+	walker := func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		rel, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+
+		_, ignore := ignoreLookup[rel]
+
+		if info.IsDir() {
+			if ignore {
+				return filepath.SkipDir
+			}
+
+			return nil
+		}
+
+		if !ignore {
+			sources = append(sources, path)
+		}
+
+		return nil
+	}
+
+	err := filepath.Walk(source, walker)
+	if err != nil {
+		return nil, err
+	}
+
+	return sources, nil
 }
