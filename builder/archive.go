@@ -2,6 +2,7 @@ package builder
 
 import (
 	"archive/zip"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,7 +17,7 @@ import (
 func archive(sources []string, basePath, outputPath string) error {
 	zipFile, err := os.Create(outputPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("error opening archive file for writing: %w", err)
 	}
 
 	defer zipFile.Close()
