@@ -4,11 +4,7 @@ app "hello" {
   path = "./hello"
 
   build {
-    use "archive" {
-      sources = ["."]
-      output_name = "hello.zip"
-      overwrite_existing = true
-    }
+    use "archive" {}
   }
 
   deploy {
@@ -21,9 +17,6 @@ app "ignore" {
 
   build {
     use "archive" {
-      sources = ["."]
-      output_name = "ignore.zip"
-      overwrite_existing = true
       ignore = ["ignore", "ignore.txt"]
     }
   }
@@ -33,15 +26,12 @@ app "ignore" {
   }
 }
 
-app "collapsed-top-level-folder" {
-  path = "./collapsed-top-level-folder"
+app "include-top-level-directory" {
+  path = "./include-top-level-directory"
 
   build {
     use "archive" {
-      sources = ["."]
-      output_name = "collapsed.zip"
-      overwrite_existing = true
-      collapse_top_level_folder = true
+      include_top_level_directory = true
     }
   }
 
