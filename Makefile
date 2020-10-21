@@ -21,5 +21,5 @@ install: build
 	@echo "Installing Plugin"
 
 	cp ./bin/waypoint-plugin-${PLUGIN_NAME} ${HOME}/.config/waypoint/plugins/
-	# For MacOS Big Sur
-	cp ./bin/waypoint-plugin-${PLUGIN_NAME} /Users/${USER}/Library/Preferences/waypoint/plugins/
+	# For MacOS Big Sur, error ignored
+	cp ./bin/waypoint-plugin-${PLUGIN_NAME} /Users/${USER}/Library/Preferences/waypoint/plugins/ || true
